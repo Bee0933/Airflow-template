@@ -1,0 +1,86 @@
+version: '3'
+
+x-airflow-common:
+  &airflow-common
+
+  image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:2.6.0-python3.9}
+  # build: .
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    
+  env_file:
+    - airflow.env
+  volumes:
+    - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
+    - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
+    - ${AIRFLOW_PROJ_DIR:-.}/data:/opt/airflow/data
+    - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
+    - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
+    - ${AIRFLOW_PROJ_DIR:-.}/pipelines:/opt/airflow/pipelines
+    - ${AIRFLOW_PROJ_DIR:-.}/requirements/airflow.txt:/opt/airflow/requirements.txt
+    - ${AIRFLOW_PROJ_DIR:-.}/script/entrypoint.sh:/opt/airflow/script/entrypoint.sh
+
+
+services:
+
+  webserver:
+    <<: *airflow-common
+    # image: apache/airflow:2.6.0-python3.9
+    command: webserver
+    entrypoint: [ "/opt/airflow/script/entrypoint.sh" ]
+    #    restart: always
+    depends_on:
+      - postgres
+    environment:
+      <<: *airflow-common-env
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: [ "CMD", "curl", "--fail", "http://localhost:8080/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - confluent
+
+
+  postgres:
+    image: postgres:13
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-}
+      - POSTGRES_PASSWORD=${POSTGRES_USER:-}
+      - POSTGRES_DB=${POSTGRES_USER:-}
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - confluent
+
+
+  scheduler:
+    <<: *airflow-common
+    depends_on:
+      webserver:
+        condition: service_healthy
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./requirements/airflow.txt:/opt/airflow/requirements.txt
+      - ./data:/opt/airflow/data
+      - ./pipelines:/opt/airflow/pipelines
+    environment:
+      <<: *airflow-common-env
+    command: bash -c "pip install --upgrade pip && pip --default-timeout=1000 install --no-cache-dir -r ./requirements.txt && airflow db upgrade && airflow scheduler"
+    networks:
+      - confluent
+networks:
+  confluent:

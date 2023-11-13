@@ -1,0 +1,4 @@
+apache-airflow==2.7.2
+black==23.10.1
+pandas==2.0.3
+pylint==3.0.2
